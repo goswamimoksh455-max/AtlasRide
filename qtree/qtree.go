@@ -118,7 +118,6 @@ func (q *Qtree) Insert(point Point) bool {
 
 }
 
-/*
 func (q *Qtree) Query(rangeRect *Rectangle, found *[]*Point) {
 	if !q.Boundary.Intersects(rangeRect) {
 		return
@@ -138,6 +137,7 @@ func (q *Qtree) Query(rangeRect *Rectangle, found *[]*Point) {
 	}
 }
 
+/*
 Usage example:
 
 found := []*Point{}
