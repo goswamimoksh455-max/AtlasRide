@@ -1,0 +1,3 @@
+- Repository is the source of truth.
+- Index is a cache that mirrors accepted state.
+- Never update index unless repo accepts the change.

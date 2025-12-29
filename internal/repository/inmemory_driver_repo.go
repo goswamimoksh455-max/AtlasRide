@@ -1,5 +1,6 @@
 package repository
 
+//repo itself is the final gateKeeper
 import (
 	"sync"
 	"time"
@@ -22,7 +23,7 @@ func NewInMemoryDriverRepository() *InMemoryDriverRepository {
 	}
 }
 
-func (r *InMemoryDriverRepository) Upsert(incoming domain.Driver) {
+func (r *InMemoryDriverRepository) Upsert(incoming domain.Driver) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -32,7 +33,7 @@ func (r *InMemoryDriverRepository) Upsert(incoming domain.Driver) {
 
 	//drop late packets ( event-time monotonicity)
 	if exists && incoming.UpdatedAt.Before(existing.driver.UpdatedAt) {
-		return
+		return false
 		//due to pckt delays , current packet for update may be got delayed in the Network Hiccups ":)"
 	}
 
@@ -40,7 +41,7 @@ func (r *InMemoryDriverRepository) Upsert(incoming domain.Driver) {
 	//Allow small skew (e.g., GPS jitters)
 	const maxSkew = 2 * time.Second
 	if incoming.UpdatedAt.After(now.Add(maxSkew)) {
-		return
+		return false
 	}
 
 	r.drivers[incoming.ID] = driverEntry{
@@ -48,6 +49,7 @@ func (r *InMemoryDriverRepository) Upsert(incoming domain.Driver) {
 		lastSeenAt: now, //server time for TTL
 	}
 
+	return true
 }
 
 func (r *InMemoryDriverRepository) Get(id string) (domain.Driver, bool) {

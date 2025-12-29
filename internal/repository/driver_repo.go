@@ -9,7 +9,7 @@ import (
 // DriverRepository abstracts driver storage.
 // Hot path implementations must be in-memory.
 type DriverRepository interface {
-	Upsert(driver domain.Driver)
+	Upsert(driver domain.Driver) bool
 	Get(id string) (domain.Driver, bool)
 	Delete(id string)
 	Alll() []domain.Driver

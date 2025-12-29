@@ -27,19 +27,31 @@ func (s *DriverIngestionService) UpdateLocation(
 	driverID string,
 	loc domain.Location,
 ) {
-	driver := domain.Driver{
-		ID:        driverID,
-		Location:  loc,
-		Status:    domain.DriverIdle,
-		UpdatedAt: time.Now(), // event time (best effort)
+	now := time.Now()
+
+	//loading existing driver if present
+	driver, exists := s.repo.Get(driverID)
+
+	if !exists {
+		driver = domain.Driver{
+			ID:     driverID,
+			Status: domain.DriverIdle,
+		}
 	}
+
+	//event-time assignment
+	driver.Location = loc
+	driver.UpdatedAt = now // event time
 
 	// Repository decides accept / drop
 	/*Monotonic Update means we only accept data if it is "newer" than what we already have.
 	because of highCuncurrent system, over the network packets may arive in
 	Out-Of-Order, so to ensure newer update is not accidental updated at by delayes pckt */
-	s.repo.Upsert(driver)
+	accepted := s.repo.Upsert(driver)
+	if !accepted {
+		return
+	}
 
-	// Index mirrors accepted state
+	// Index mirrors accepted state ONLY
 	s.index.Update(driver)
 }
