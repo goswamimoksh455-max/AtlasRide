@@ -146,6 +146,6 @@ func (h *H3Index) Nearby(cellID string, k int) []domain.Driver {
 	}
 
 	return results
-	//O(C,D) - C:number of Cells in K-ring, D:total drivers in those cells
+	//O(C+D) - C:number of Cells in K-ring, D:total drivers in those cells
 
 }
