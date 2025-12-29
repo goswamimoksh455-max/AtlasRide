@@ -59,3 +59,34 @@ The "Source of Truth" for driver locations and availability.
 ## 5. Future Scalability (V2)
 * Replace flat-map iteration with **Geospatial Indexing** (Uber H3 or S2).
 * Introduce **Redis** as a persistent backup for the in-memory state.
+
+
+
+
+
+##### BUGS NEED TO BE SOLVED:
+
+# 1 - handled in spatial - Update()
+- The "Busy Driver" Eviction Bug
+This is the most common mistake in ride-sharing systems.
+
+-- The Scenario: A driver is BUSY on a 20-minute ride. Because they are driving, the app might stop sending "Available" heartbeats, or the server logic ignores them because the driver isn't "Idle."
+
+-- The Error: The TTL Loop sees no heartbeats for 60 seconds and deletes the driver from memory.
+
+-- The Consequence: The system "forgets" the driver is on a ride. When the ride ends, the driver can't "Complete" the trip because their record is gone.
+
+-- 9.5/10 Fix: Your Eviction Loop must check the status. Never evict a driver if their status is BUSY or MATCHING, even if their heartbeat is old.
+
+# 2 
+- Memory Fragmentation (Churn)
+If you have 10,000 drivers constantly connecting and disconnecting:
+
+-- Churn: High frequency of make() and delete() on your Go map.
+
+-- TTL: Constantly clearing out old entries.
+
+-- The Risk: In Go, deleting from a map doesn't always shrink the memory immediately. If you have massive "Churn + TTL," your RAM usage might keep climbing even though the number of drivers stays the same.
+
+### feature 
+10/10 System: Take those top 3 and call an external Routing API (like OSRM or Google Maps) to find the "Road Distance" (accounting for one-way streets and traffic). Haversine is your fast filter before doing expensive routing calls.
