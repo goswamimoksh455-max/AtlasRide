@@ -2,7 +2,6 @@ package matching
 
 import (
 	"sort"
-	"time"
 
 	"github.com/goswamimoksh455-max/projects/AtlasRide/internal/domain"
 	"github.com/goswamimoksh455-max/projects/AtlasRide/internal/spatial"
@@ -14,6 +13,7 @@ import (
 type DriverStore interface {
 	Get(id string) (domain.Driver, bool)
 	Upsert(domain.Driver) bool
+	TransitionStatus(id string, to domain.DriverStatus) error
 }
 
 type SpatialIndex interface {
@@ -47,9 +47,6 @@ func (s *Service) Match(req MatchRequest) (*MatchResult, error) {
 	//then Get nearby IDLE drivers (snapshot)
 	candidates := s.spatial.Nearby(cell, req.K)
 
-	// bestDriverId := ""
-	// bestDistance := math.MaxFloat64
-
 	//distance filter + best pick
 	//finding closest
 	candidateRanked := make([]candidate, 0, len(candidates))
@@ -64,10 +61,6 @@ func (s *Service) Match(req MatchRequest) (*MatchResult, error) {
 		if dist > req.MaxDist {
 			continue
 		}
-		// if dist < bestDistance {
-		// 	bestDistance = dist
-		// 	bestDriverId = d.ID
-		// }
 
 		candidateRanked = append(candidateRanked, candidate{
 			driverID: d.ID,
@@ -84,7 +77,7 @@ func (s *Service) Match(req MatchRequest) (*MatchResult, error) {
 		maxAttempts = len(candidateRanked)
 	}
 
-	for i := 0; i < len(candidates) && i < 3; i++ {
+	for i := 0; i < maxAttempts; i++ {
 
 		c := candidateRanked[i]
 
@@ -93,18 +86,31 @@ func (s *Service) Match(req MatchRequest) (*MatchResult, error) {
 		if !ok || driver.Status != domain.DriverIdle {
 			continue
 		}
+		// reserve driver (exclusive lock via FSM)
+		err := s.drivers.TransitionStatus(
+			c.driverID,
+			domain.DriverMatching,
+		)
+		if err != nil {
+			continue //race lost
+		}
 
-		//Assign driver
-		driver.Status = domain.DriverBusy
-		driver.UpdatedAt = time.Now()
-
-		//upsert returns false if rejected (late pkt, race contn)
-		if s.drivers.Upsert(driver) {
+		//commit
+		err = s.drivers.TransitionStatus(
+			c.driverID,
+			domain.DriverBusy,
+		)
+		if err == nil {
 			return &MatchResult{
 				RiderID:  req.RiderID,
-				DriverID: driver.ID,
-				Distance: candidateRanked[i].distance,
+				DriverID: c.driverID,
+				Distance: c.distance,
 			}, nil
+		} else {
+			_ = s.drivers.TransitionStatus(
+				c.driverID,
+				domain.DriverIdle,
+			)
 		}
 
 	}

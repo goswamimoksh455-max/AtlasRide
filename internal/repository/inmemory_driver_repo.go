@@ -2,6 +2,7 @@ package repository
 
 //repo itself is the final gateKeeper
 import (
+	"errors"
 	"sync"
 	"time"
 
@@ -100,3 +101,47 @@ func (r *InMemoryDriverRepository) All() []domain.Driver {
 
 //IMP to keep the repo swapable with the Redis latter we
 //are not keeping the TTL logic in the REPO so it dont become time-aware
+
+func (r *InMemoryDriverRepository) TransitionStatus(
+	driverID string,
+	to domain.DriverStatus,
+) error {
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	entry, ok := r.drivers[driverID]
+	if !ok {
+		return errors.New("driver not found")
+	}
+
+	from := entry.driver.Status
+
+	if !domain.CanTransition(from, to) {
+		return domain.ErrInvalidTransition
+	}
+
+	entry.driver.Status = to
+	entry.driver.UpdatedAt = time.Now()
+
+	r.drivers[driverID] = entry
+	return nil
+}
+
+func (r *InMemoryDriverRepository) FilterByStatus(
+	ids []string,
+	status domain.DriverStatus,
+) []string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	result := make([]string, 0)
+	for _, id := range ids {
+		entry, ok := r.drivers[id]
+		if ok && entry.driver.Status == status {
+			result = append(result, id)
+		}
+	}
+
+	return result
+}

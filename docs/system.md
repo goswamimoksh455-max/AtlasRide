@@ -27,3 +27,12 @@
             Pick Best
                     ↓
             Mark BUSY (Atomic intent)
+
+
+## Transition:
+-      OFFLINE → IDLE    (driver comes online)
+        IDLE → MATCHING      (candidate selected)
+        MATCHING → BUSY      (ride accepted)
+        MATCHING → IDLE      (ride rejected / timeout)
+        BUSY → IDLE          (ride completed)
+        IDLE → OFFLINE       (driver goes offline)
