@@ -57,3 +57,12 @@ Soln : before Matching , Introduce a soft lock
                BUSY
 Properties :
 Auto-expires, Non-Blocking, Idempotent,Safer under crash
+
+
+little changes for Async accept/reject:
+IDLE
+ └─ TryLockIntent(rider)
+     └─ MATCHING (offer sent)
+         ├─ Accept → BUSY
+         ├─ Reject → IDLE
+         └─ Timeout → Recovery → IDLE

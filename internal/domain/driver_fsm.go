@@ -3,7 +3,8 @@ package domain
 import "errors"
 
 var (
-	ErrInvalidTransition = errors.New("invalid sriver state transition")
+	ErrInvalidTransition   = errors.New("invalid sriver state transition")
+	ErrRideAlreadyAssigned = errors.New("Ride Already Assigned")
 )
 
 func CanTransition(from, to DriverStatus) bool {

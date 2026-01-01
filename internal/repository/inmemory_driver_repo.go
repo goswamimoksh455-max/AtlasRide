@@ -186,7 +186,8 @@ func (r *InMemoryDriverRepository) FindStuckMatching(
 		if (entry.driver.Status == domain.DriverMatching &&
 			entry.driver.MatchingSince != nil &&
 			now.Sub(*entry.driver.MatchingSince) > timeout) ||
-			(entry.driver.HasActiveIntent(now) && now.Sub(entry.driver.Intent.ExpiresAt) > timeout) {
+			(entry.driver.HasActiveIntent(now) && now.Sub(entry.driver.Intent.ExpiresAt) > timeout) ||
+			(now.After(entry.driver.Intent.ExpiresAt)) {
 
 			stuck = append(stuck, id)
 		}
@@ -241,4 +242,42 @@ func (r *InMemoryDriverRepository) ClearIntent(driverID string) {
 	entry.driver.Intent = nil
 	entry.driver.UpdatedAt = time.Now()
 	r.drivers[driverID] = entry
+}
+
+func (r *InMemoryDriverRepository) RespondToIntent(
+	driverID string,
+	riderID string,
+	response domain.DriverResponse,
+) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	entry, ok := r.drivers[driverID]
+	if !ok {
+		return errors.New("Driver not Found")
+	}
+
+	d := entry.driver
+
+	if d.Status != domain.DriverMatching ||
+		d.Intent == nil ||
+		d.Intent.RiderID != riderID {
+		return errors.New("Invalid Intent")
+	}
+
+	switch response {
+	case domain.Accept:
+		d.Status = domain.DriverBusy
+		d.Intent = nil
+		d.MatchingSince = nil
+
+	case domain.Reject:
+		d.Status = domain.DriverIdle
+		d.Intent = nil
+		d.MatchingSince = nil
+	}
+
+	entry.driver = d
+	r.drivers[driverID] = entry
+	return nil
 }

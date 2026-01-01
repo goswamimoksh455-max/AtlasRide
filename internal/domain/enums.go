@@ -25,3 +25,10 @@ func (s DriverStatus) String() string {
 		return "UNKNOWN"
 	}
 }
+
+type DriverResponse int
+
+const (
+	Accept DriverResponse = iota
+	Reject
+)
