@@ -18,6 +18,8 @@ type DriverStore interface {
 	Upsert(domain.Driver) bool
 	TransitionStatus(id string, to domain.DriverStatus) error
 	FindStuckMatching(timeout time.Duration) []string //stuck driver IDs
+	ClearIntent(driverID string)
+	TryLockIntent(driverID string, riderID string, ttl time.Duration) error
 }
 
 type SpatialIndex interface {
@@ -95,17 +97,30 @@ func (s *Service) Match(req MatchRequest) (*MatchResult, error) {
 		if !ok || driver.Status != domain.DriverIdle {
 			continue
 		}
+
+		//trying to aquire intent lock ( cuncurrency real gate)
+		err := s.drivers.TryLockIntent(
+			c.driverID,
+			req.RiderID,
+			5*time.Second,
+		)
+		if err != nil {
+			continue //somene else won in cuncrrent attempt
+		}
+
 		// reserve driver (exclusive lock via FSM)
-		err := s.drivers.TransitionStatus(
+		err = s.drivers.TransitionStatus(
 			c.driverID,
 			domain.DriverMatching,
 		)
 		if err != nil {
-			continue //race lost
+			s.drivers.ClearIntent(c.driverID) //rollback intent in FSM fails
+			continue                          //race lost
 		}
 
 		//commit needed to be done by the Driver,then bottom code will execute
-		err = s.drivers.TransitionStatus(
+
+		err = s.drivers.TransitionStatus( //bussy statu clear the intent in transition
 			c.driverID,
 			domain.DriverBusy,
 		)
@@ -145,11 +160,16 @@ func (s *RecoveryService) Recover() {
 
 	for _, driverID := range stuckDrivers {
 		slog.Info(fmt.Sprintf("driver was stuck, id:%s", driverID))
+
 		_ = s.drivers.TransitionStatus(
 			driverID,
 			domain.DriverIdle,
 		)
+
+		s.drivers.ClearIntent(driverID)
 	}
+
+	//intent is concurrency lock
 }
 
 //Idempotent

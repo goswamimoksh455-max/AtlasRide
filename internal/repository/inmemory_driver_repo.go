@@ -130,10 +130,17 @@ func (r *InMemoryDriverRepository) TransitionStatus(
 	now := time.Now()
 
 	//FSM side-effects
-	if to == domain.DriverMatching {
+	switch to {
+	case domain.DriverMatching:
 		entry.driver.MatchingSince = &now
-	} else {
+
+	case domain.DriverBusy:
 		entry.driver.MatchingSince = nil
+		entry.driver.Intent = nil //critical cleanup
+
+	case domain.DriverIdle:
+		entry.driver.MatchingSince = nil
+		entry.driver.Intent = nil // safe cleanup
 	}
 
 	entry.driver.Status = to
@@ -176,13 +183,62 @@ func (r *InMemoryDriverRepository) FindStuckMatching(
 	var stuck []string
 
 	for id, entry := range r.drivers {
-		if entry.driver.Status == domain.DriverMatching &&
+		if (entry.driver.Status == domain.DriverMatching &&
 			entry.driver.MatchingSince != nil &&
-			now.Sub(*entry.driver.MatchingSince) > timeout {
+			now.Sub(*entry.driver.MatchingSince) > timeout) ||
+			(entry.driver.HasActiveIntent(now) && now.Sub(entry.driver.Intent.ExpiresAt) > timeout) {
 
 			stuck = append(stuck, id)
 		}
 	}
 
 	return stuck
+}
+
+// Adding Intent Lock Method
+func (r *InMemoryDriverRepository) TryLockIntent(
+	driverID string,
+	riderID string,
+	ttl time.Duration,
+
+) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	entry, ok := r.drivers[driverID]
+	if !ok {
+		return errors.New("Driver Not Found")
+	}
+
+	now := time.Now()
+
+	//in case somene else already locked it
+	if entry.driver.HasActiveIntent(now) {
+		return errors.New("intent already locked")
+	}
+
+	entry.driver.Intent = &domain.MatchIntent{
+		RiderID:   riderID,
+		ExpiresAt: now.Add(ttl),
+	}
+	entry.driver.UpdatedAt = now
+
+	r.drivers[driverID] = entry
+	return nil
+}
+
+//cuncurrency gate
+
+func (r *InMemoryDriverRepository) ClearIntent(driverID string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	entry, ok := r.drivers[driverID]
+	if !ok {
+		return
+	}
+
+	entry.driver.Intent = nil
+	entry.driver.UpdatedAt = time.Now()
+	r.drivers[driverID] = entry
 }

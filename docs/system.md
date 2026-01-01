@@ -43,3 +43,17 @@ main.go
  ├─ repository/        ← driverRepo (source of truth)
  ├─ spatial/           ← H3Index
  ├─ matching/          ← Matching Service
+
+
+## 
+bussy is too late ,because of two rider founds Same rider Idle , it is possible that both try to lock them, and evantual one of them get success , but both already sent pings
+Soln : before Matching , Introduce a soft lock
+               IDLE
+                ↓
+        INTENT_LOCKED (TTL based)
+                ↓
+             MATCHING
+                ↓
+               BUSY
+Properties :
+Auto-expires, Non-Blocking, Idempotent,Safer under crash
