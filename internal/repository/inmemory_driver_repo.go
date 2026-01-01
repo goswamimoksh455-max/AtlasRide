@@ -3,6 +3,8 @@ package repository
 //repo itself is the final gateKeeper
 import (
 	"errors"
+	"fmt"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -34,6 +36,7 @@ func (r *InMemoryDriverRepository) Upsert(incoming domain.Driver) bool {
 
 	//drop late packets ( event-time monotonicity)
 	if exists && incoming.UpdatedAt.Before(existing.driver.UpdatedAt) {
+		slog.Info(fmt.Sprintf(" Droped Late Packet, Driver_id:%d", incoming.ID))
 		return false
 		//due to pckt delays , current packet for update may be got delayed in the Network Hiccups ":)"
 	}
@@ -42,6 +45,7 @@ func (r *InMemoryDriverRepository) Upsert(incoming domain.Driver) bool {
 	//Allow small skew (e.g., GPS jitters)
 	const maxSkew = 2 * time.Second
 	if incoming.UpdatedAt.After(now.Add(maxSkew)) {
+		slog.Info(fmt.Sprintf("Droped large skew, for clock skew protection , id:%d", incoming.ID))
 		return false
 	}
 
@@ -112,19 +116,31 @@ func (r *InMemoryDriverRepository) TransitionStatus(
 
 	entry, ok := r.drivers[driverID]
 	if !ok {
+		slog.Error("Driver Not Found")
 		return errors.New("driver not found")
 	}
 
 	from := entry.driver.Status
 
 	if !domain.CanTransition(from, to) {
+		slog.Error("Error - invalid Transition")
 		return domain.ErrInvalidTransition
+	}
+
+	now := time.Now()
+
+	//FSM side-effects
+	if to == domain.DriverMatching {
+		entry.driver.MatchingSince = &now
+	} else {
+		entry.driver.MatchingSince = nil
 	}
 
 	entry.driver.Status = to
 	entry.driver.UpdatedAt = time.Now()
 
 	r.drivers[driverID] = entry
+
 	return nil
 }
 
@@ -132,6 +148,7 @@ func (r *InMemoryDriverRepository) FilterByStatus(
 	ids []string,
 	status domain.DriverStatus,
 ) []string {
+
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -144,4 +161,28 @@ func (r *InMemoryDriverRepository) FilterByStatus(
 	}
 
 	return result
+}
+
+// Sweeper for Scan Drivers and Who are too long in the
+// Matching state due to any resone Roll them back to IDLE
+func (r *InMemoryDriverRepository) FindStuckMatching(
+	timeout time.Duration,
+) []string {
+
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	now := time.Now()
+	var stuck []string
+
+	for id, entry := range r.drivers {
+		if entry.driver.Status == domain.DriverMatching &&
+			entry.driver.MatchingSince != nil &&
+			now.Sub(*entry.driver.MatchingSince) > timeout {
+
+			stuck = append(stuck, id)
+		}
+	}
+
+	return stuck
 }

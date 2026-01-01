@@ -9,4 +9,6 @@ type Driver struct {
 	Location  Location
 	Status    DriverStatus
 	UpdatedAt time.Time
+
+	MatchingSince *time.Time //nil unless matching
 }

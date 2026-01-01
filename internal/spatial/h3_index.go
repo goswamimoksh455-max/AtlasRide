@@ -18,6 +18,7 @@ import (
 
 // this new vorsion is good, stores the snap-shot in-memory
 // for deterministic latency , and no more dependency on repository during matching
+
 type H3Index struct {
 	resolution    int
 	cellToDrivers map[h3.Cell]map[string]domain.Driver
@@ -165,6 +166,36 @@ func (h *H3Index) Nearby(cell h3.Cell, k int) []domain.Driver {
 
 }
 
+func (h *H3Index) NearbyProgressive(
+	origin h3.Cell,
+	targetCount int,
+	maxRings int,
+) []string {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+
+	seen := make(map[string]struct{})
+	result := make([]string, 0, targetCount)
+
+	for ring := 0; ring <= maxRings; ring++ {
+		//get all hexes In this Ring
+		cells, _ := origin.GridDisk(ring)
+
+		for _, c := range cells {
+			for _, driver := range h.cellToDrivers[c] {
+				if _, exists := seen[driver.ID]; !exists {
+					result = append(result, driver.ID)
+					seen[driver.ID] = struct{}{}
+				}
+				if len(result) >= targetCount {
+					return result
+				}
+			}
+		}
+	}
+	return result
+}
+
 func (h *H3Index) CellIDForLocation(loc domain.Location) (h3.Cell, error) {
 	cell, err := h.cellForLocation(loc)
 	if err != nil {
@@ -196,3 +227,76 @@ func DistanceMeters(lat1, lng1, lat2, lng2 float64) float64 {
 func degreesToRadians(d float64) float64 {
 	return d * math.Pi / 180
 }
+
+// func (h *H3Index) DriverCount(cell h3.Cell) int {
+// 	h.mu.RLock()
+// 	defer h.mu.RUnlock()
+
+// 	if drivers, ok := h.cellToDrivers[cell]; ok {
+// 		return len(drivers)
+// 	}
+
+// 	return 0
+// }
+
+// just based on the current knowledge need to study actual performence
+func adaptiveMaxRings(driverCount int) int {
+	switch {
+	case driverCount >= 50:
+		return 1 //very dense
+	case driverCount >= 15:
+		return 2
+	case driverCount >= 5:
+		return 3
+	default:
+		return 5 //sparse
+
+	}
+}
+
+// Successive of Our Nearby() to make it Adaptive
+func (h *H3Index) NearbyAdaptive(
+	origin h3.Cell,
+	targetCount int,
+
+) []domain.Driver {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+
+	density := 0
+	if drivers, ok := h.cellToDrivers[origin]; ok {
+		density = len(drivers)
+	}
+
+	maxRings := adaptiveMaxRings(density)
+
+	seen := make(map[string]struct{})
+	results := make([]domain.Driver, 0, targetCount)
+
+	for ring := 0; ring <= maxRings; ring++ {
+		cells, _ := origin.GridDisk(ring) //h3.GridDisk(origin,ring)
+
+		for _, c := range cells {
+			for _, driver := range h.cellToDrivers[c] {
+				if driver.Status != domain.DriverIdle {
+					continue
+				}
+				if _, ok := seen[driver.ID]; ok { //avoiding Duplicates
+					continue
+				}
+
+				results = append(results, driver)
+				seen[driver.ID] = struct{}{}
+
+				if len(results) >= targetCount {
+					return results
+				}
+
+			}
+		}
+	}
+	return results
+}
+
+//Adaptive for cities, and rural areas
+//No Repository calls, No random IO, All Memory-Local

@@ -1,7 +1,10 @@
 package matching
 
 import (
+	"fmt"
+	"log/slog"
 	"sort"
+	"time"
 
 	"github.com/goswamimoksh455-max/projects/AtlasRide/internal/domain"
 	"github.com/goswamimoksh455-max/projects/AtlasRide/internal/spatial"
@@ -14,6 +17,7 @@ type DriverStore interface {
 	Get(id string) (domain.Driver, bool)
 	Upsert(domain.Driver) bool
 	TransitionStatus(id string, to domain.DriverStatus) error
+	FindStuckMatching(timeout time.Duration) []string //stuck driver IDs
 }
 
 type SpatialIndex interface {
@@ -21,6 +25,11 @@ type SpatialIndex interface {
 	CellIDForLocation(loc domain.Location) (h3.Cell, error)
 }
 
+// added for Recovery from Too long Matching stuck
+type RecoveryService struct {
+	drivers DriverStore
+	timeout time.Duration
+}
 type Service struct {
 	drivers DriverStore
 	spatial SpatialIndex
@@ -95,12 +104,13 @@ func (s *Service) Match(req MatchRequest) (*MatchResult, error) {
 			continue //race lost
 		}
 
-		//commit
+		//commit needed to be done by the Driver,then bottom code will execute
 		err = s.drivers.TransitionStatus(
 			c.driverID,
 			domain.DriverBusy,
 		)
 		if err == nil {
+			slog.Info(fmt.Sprintf("[MATCH] rider=%s trying driver=%s dist=%.2fm\n", req.RiderID, c.driverID, c.distance))
 			return &MatchResult{
 				RiderID:  req.RiderID,
 				DriverID: c.driverID,
@@ -118,3 +128,30 @@ func (s *Service) Match(req MatchRequest) (*MatchResult, error) {
 	return nil, ErrNoDriversAvailable
 
 }
+
+func NewRecoveryService(drivers DriverStore) *RecoveryService {
+	return &RecoveryService{
+		drivers: drivers,
+		timeout: 5 * time.Second,
+	}
+	//just nneed to pass the DriverStore instance to make the RecoverService
+	//DriverStore is just to limit the Interaction Methods of the InMemoryDriverService
+}
+
+func (s *RecoveryService) Recover() {
+
+	slog.Info("recovery tick")
+	stuckDrivers := s.drivers.FindStuckMatching(s.timeout)
+
+	for _, driverID := range stuckDrivers {
+		slog.Info(fmt.Sprintf("driver was stuck, id:%s", driverID))
+		_ = s.drivers.TransitionStatus(
+			driverID,
+			domain.DriverIdle,
+		)
+	}
+}
+
+//Idempotent
+//safe to run Repeatedly
+//No coordination Required

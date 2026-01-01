@@ -36,3 +36,10 @@
         MATCHING → IDLE      (ride rejected / timeout)
         BUSY → IDLE          (ride completed)
         IDLE → OFFLINE       (driver goes offline)
+
+##
+main.go
+ ├─ domain/
+ ├─ repository/        ← driverRepo (source of truth)
+ ├─ spatial/           ← H3Index
+ ├─ matching/          ← Matching Service
