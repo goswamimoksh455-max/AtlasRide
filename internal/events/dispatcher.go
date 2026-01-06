@@ -1,5 +1,7 @@
 package events
 
 type Dispatcher interface {
-	EmitDriverOffer(driverID, riderID string) error
+	EnqueueDriverOffer(driverID, riderID string) error
+	Start()
+	Stop()
 }

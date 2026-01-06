@@ -8,6 +8,7 @@ import (
 
 	"github.com/goswamimoksh455-max/projects/AtlasRide/internal/domain"
 	"github.com/goswamimoksh455-max/projects/AtlasRide/internal/events"
+	"github.com/goswamimoksh455-max/projects/AtlasRide/internal/repository"
 	"github.com/goswamimoksh455-max/projects/AtlasRide/internal/spatial"
 	"github.com/uber/h3-go/v4"
 )
@@ -29,14 +30,6 @@ type SpatialIndex interface {
 	CellIDForLocation(loc domain.Location) (h3.Cell, error)
 }
 
-type OfferGroupStore interface {
-	Create(riderID string, driverIDs []string, ttl time.Duration)
-	Exists(riderID string) bool
-	Remove(riderID string)
-	OtherDrivers(riderID, driverID string) []string
-	WithLock(riderID string, fn func())
-}
-
 // added for Recovery from Too long Matching stuck
 type RecoveryService struct {
 	drivers DriverStore
@@ -46,10 +39,10 @@ type Service struct {
 	drivers     DriverStore
 	spatial     SpatialIndex
 	events      events.Dispatcher
-	offerGroups OfferGroupStore
+	offerGroups repository.OfferGroupStore
 }
 
-func NewService(drivers DriverStore, spatial SpatialIndex, events events.Dispatcher, offerGroups OfferGroupStore) *Service {
+func NewService(drivers DriverStore, spatial SpatialIndex, events events.Dispatcher, offerGroups repository.OfferGroupStore) *Service {
 	return &Service{
 		drivers:     drivers,
 		spatial:     spatial,
@@ -165,11 +158,19 @@ func (s *Service) Match(req MatchRequest) (*MatchResult, error) {
 		5*time.Second,
 	)
 
-	//Emiting offers asynchronously
-	for _, driverID := range lockedDrivers {
-		go s.events.EmitDriverOffer(driverID, req.RiderID)
-	}
+	//Emiting offers asynchronously, but maintaining control over the GO routine
+	//but need to control the Go routine count
+	//note : Backpressure means: “If downstream can’t keep up, upstream must slow down.”
 
+	for _, driverID := range lockedDrivers {
+		err := s.events.EnqueueDriverOffer(driverID, req.RiderID)
+		if err != nil {
+			slog.Warn("offer queue full",
+				"driver", driverID,
+				"rider", req.RiderID,
+			)
+		}
+	}
 	return &MatchResult{
 		RiderID:  req.RiderID,
 		DriverID: "", //assigned asynchronously

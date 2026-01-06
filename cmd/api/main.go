@@ -1,15 +1,18 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"os"
 	"time"
 
 	"github.com/goswamimoksh455-max/projects/AtlasRide/internal/domain"
+	"github.com/goswamimoksh455-max/projects/AtlasRide/internal/events"
 	"github.com/goswamimoksh455-max/projects/AtlasRide/internal/matching"
 	"github.com/goswamimoksh455-max/projects/AtlasRide/internal/repository"
 	"github.com/goswamimoksh455-max/projects/AtlasRide/internal/spatial"
+	"github.com/redis/go-redis/v9"
 )
 
 func initLogger() (*os.File, error) {
@@ -44,9 +47,27 @@ func main() {
 	spatialIndex := spatial.NewH3Index(9) //9 ~65-70m, 10 ~10m, 8 ~170m
 	//1-2 ring neighbors ~200-500m coverage
 	// ? k=20 thinking about it..
+	ctx := context.Background()
+	redisClient := redis.NewClient(&redis.Options{
+		Addr:     "localhost:6379", //address of the redis server
+		Password: "",               //by default no pass
+		DB:       0,                //default DB
+	})
+	err = redisClient.Ping(ctx).Err()
+	if err != nil {
+		panic(err) //handles the connection error
+	}
 
 	//creating Service that depend on it
-	matchingService := matching.NewService(driverRepo, spatialIndex)
+	offerStore := matching.NewRedisOfferGroupStore(redisClient)
+	dispatcher := events.NewInMemoryDispatcher(offerStore)
+
+	matchingService := matching.NewService(
+		driverRepo,
+		spatialIndex,
+		dispatcher,
+		offerStore,
+	)
 
 	//no coordination required
 	recoveryService := matching.NewRecoveryService(driverRepo)

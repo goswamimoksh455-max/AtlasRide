@@ -88,6 +88,12 @@ If you have 10,000 drivers constantly connecting and disconnecting:
 
 -- The Risk: In Go, deleting from a map doesn't always shrink the memory immediately. If you have massive "Churn + TTL," your RAM usage might keep climbing even though the number of drivers stays the same.
 
+
+# 3
+Redis backed OfferGroupStore ( distributed Coordination)
++ Redis is our distributed lock + TTL coordination
++ Setting the expirey rathor TTL swepper
+
 ### feature 
 10/10 System: Take those top 3 and call an external Routing API (like OSRM or Google Maps) to find the "Road Distance" (accounting for one-way streets and traffic). Haversine is your fast filter before doing expensive routing calls.
 
@@ -99,3 +105,4 @@ res9 -> res8 -> res7 (for sparse areas)
 ++> Metrics : avg_rings_used, p99_match_latency
 
 ++> ETA
+

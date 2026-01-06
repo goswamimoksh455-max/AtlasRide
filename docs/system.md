@@ -66,3 +66,42 @@ IDLE
          ├─ Accept → BUSY
          ├─ Reject → IDLE
          └─ Timeout → Recovery → IDLE
+
+
+Redis IS:
+A single-threaded, in-memory, atomic state machine with TTL
+
+##
+
+Requirement	            Why
+Bounded concurrency	prevent overload
+Backpressure	        system stability
+Retry with limits	transient failure handling
+Decoupling	        matching ≠ delivery
+Observability	        logs & metrics
+Failure isolation	matching must not crash
+
++------------------+
+| Matching Service |
++--------+---------+
+         |
+         | OfferEvent
+         v
++------------------+
+|  Event Queue     |  (bounded channel)
++--------+---------+
+         |
+         v
++------------------+
+| Worker Pool (N)  |
++--------+---------+
+         |
+         v
++------------------+
+| Push / Kafka /   |
+| Notification     |
++------------------+
+
+
+## notes
+Only the sender OR the owner closes a channel — never both
