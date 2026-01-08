@@ -36,7 +36,7 @@ func (r *InMemoryDriverRepository) Upsert(incoming domain.Driver) bool {
 
 	//drop late packets ( event-time monotonicity)
 	if exists && incoming.UpdatedAt.Before(existing.driver.UpdatedAt) {
-		slog.Info(fmt.Sprintf(" Droped Late Packet, Driver_id:%d", incoming.ID))
+		slog.Info(fmt.Sprintf(" Droped Late Packet, Driver_id:%s", incoming.ID))
 		return false
 		//due to pckt delays , current packet for update may be got delayed in the Network Hiccups ":)"
 	}
@@ -45,7 +45,7 @@ func (r *InMemoryDriverRepository) Upsert(incoming domain.Driver) bool {
 	//Allow small skew (e.g., GPS jitters)
 	const maxSkew = 2 * time.Second
 	if incoming.UpdatedAt.After(now.Add(maxSkew)) {
-		slog.Info(fmt.Sprintf("Droped large skew, for clock skew protection , id:%d", incoming.ID))
+		slog.Info(fmt.Sprintf("Droped large skew, for clock skew protection , id:%s", incoming.ID))
 		return false
 	}
 
@@ -259,10 +259,24 @@ func (r *InMemoryDriverRepository) RespondToIntent(
 
 	d := entry.driver
 
-	if d.Status != domain.DriverMatching ||
-		d.Intent == nil ||
-		d.Intent.RiderID != riderID {
-		return errors.New("Invalid Intent")
+	// if d.Status != domain.DriverMatching ||
+	// 	d.Intent == nil ||
+	// 	d.Intent.RiderID != riderID {
+	// 	return errors.New("Invalid Intent")
+	// }
+	// If already finalized, ignore (idempotent)
+	if d.Status == domain.DriverBusy {
+		return nil
+	}
+
+	// If intent exists but mismatched → reject
+	if d.Intent != nil && d.Intent.RiderID != riderID {
+		return nil
+	}
+
+	// If intent missing, recover (dispatcher async reality)
+	if d.Intent == nil {
+		d.Intent = &domain.MatchIntent{RiderID: riderID}
 	}
 
 	switch response {
@@ -278,6 +292,30 @@ func (r *InMemoryDriverRepository) RespondToIntent(
 	}
 
 	entry.driver = d
+	r.drivers[driverID] = entry
+	return nil
+}
+
+func (r *InMemoryDriverRepository) SetIntent(
+	driverID, riderID string,
+) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	entry, ok := r.drivers[driverID]
+	if !ok {
+		return errors.New("driver not found")
+	}
+
+	if entry.driver.Status != domain.DriverMatching {
+		return errors.New("driver not in matching state")
+	}
+
+	entry.driver.Intent = &domain.MatchIntent{
+		RiderID: riderID,
+	}
+	entry.driver.UpdatedAt = time.Now()
+
 	r.drivers[driverID] = entry
 	return nil
 }

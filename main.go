@@ -62,8 +62,16 @@ func main() {
 	})
 
 	http.HandleFunc("/in", func(w http.ResponseWriter, r *http.Request) {
-		x, _ := strconv.ParseFloat(r.URL.Query().Get("x"), 64)
-		y, _ := strconv.ParseFloat(r.URL.Query().Get("y"), 64)
+		x, err := strconv.ParseFloat(r.URL.Query().Get("x"), 64)
+		if err != nil {
+			http.Error(w, "Invalid x coordinate", http.StatusBadRequest)
+			return
+		}
+		y, err := strconv.ParseFloat(r.URL.Query().Get("y"), 64)
+		if err != nil {
+			http.Error(w, "Invalid y coordinate", http.StatusBadRequest)
+			return
+		}
 		qt.Insert(qtree.Point{X: x, Y: y})
 
 		w.Header().Set("Content-Type", "application/json")
@@ -72,10 +80,26 @@ func main() {
 	})
 
 	http.HandleFunc("/query", func(w http.ResponseWriter, r *http.Request) {
-		x, _ := strconv.ParseFloat(r.URL.Query().Get("x"), 64)
-		y, _ := strconv.ParseFloat(r.URL.Query().Get("y"), 64)
-		hw, _ := strconv.ParseFloat(r.URL.Query().Get("w"), 64)
-		hh, _ := strconv.ParseFloat(r.URL.Query().Get("h"), 64)
+		x, err := strconv.ParseFloat(r.URL.Query().Get("x"), 64)
+		if err != nil {
+			http.Error(w, "Invalid x coordinate", http.StatusBadRequest)
+			return
+		}
+		y, err := strconv.ParseFloat(r.URL.Query().Get("y"), 64)
+		if err != nil {
+			http.Error(w, "Invalid y coordinate", http.StatusBadRequest)
+			return
+		}
+		hw, err := strconv.ParseFloat(r.URL.Query().Get("w"), 64)
+		if err != nil {
+			http.Error(w, "Invalid w coordinate", http.StatusBadRequest)
+			return
+		}
+		hh, err := strconv.ParseFloat(r.URL.Query().Get("h"), 64)
+		if err != nil {
+			http.Error(w, "Invalid h coordinate", http.StatusBadRequest)
+			return
+		}
 
 		searchArea := qtree.Rectangle{
 			X:  x,

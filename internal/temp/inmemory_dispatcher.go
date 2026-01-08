@@ -1,4 +1,4 @@
-package events
+package temp
 
 import (
 	"log/slog"

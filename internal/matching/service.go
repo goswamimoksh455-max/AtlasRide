@@ -1,6 +1,7 @@
 package matching
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"sort"
@@ -8,7 +9,7 @@ import (
 
 	"github.com/goswamimoksh455-max/projects/AtlasRide/internal/domain"
 	"github.com/goswamimoksh455-max/projects/AtlasRide/internal/events"
-	"github.com/goswamimoksh455-max/projects/AtlasRide/internal/repository"
+	"github.com/goswamimoksh455-max/projects/AtlasRide/internal/offer"
 	"github.com/goswamimoksh455-max/projects/AtlasRide/internal/spatial"
 	"github.com/uber/h3-go/v4"
 )
@@ -21,8 +22,9 @@ type DriverStore interface {
 	TransitionStatus(id string, to domain.DriverStatus) error
 	FindStuckMatching(timeout time.Duration) []string //stuck driver IDs
 	ClearIntent(driverID string)
-	TryLockIntent(driverID string, riderID string, ttl time.Duration) error
+	//TryLockIntent(driverID string, riderID string, ttl time.Duration) error
 	RespondToIntent(driverID string, riderID string, response domain.DriverResponse) error
+	SetIntent(driverID string, riderID string) error
 }
 
 type SpatialIndex interface {
@@ -39,16 +41,19 @@ type Service struct {
 	drivers     DriverStore
 	spatial     SpatialIndex
 	events      events.Dispatcher
-	offerGroups repository.OfferGroupStore
+	offerGroups offer.RedisOfferGroupStore
 }
 
-func NewService(drivers DriverStore, spatial SpatialIndex, events events.Dispatcher, offerGroups repository.OfferGroupStore) *Service {
+func NewService(drivers DriverStore, spatial SpatialIndex, offerGroups offer.RedisOfferGroupStore) *Service {
 	return &Service{
 		drivers:     drivers,
 		spatial:     spatial,
-		events:      events,
 		offerGroups: offerGroups,
 	}
+}
+
+func (s *Service) SetEventDispatcher(dispatcher events.Dispatcher) {
+	s.events = dispatcher
 }
 
 func (s *Service) Match(req MatchRequest) (*MatchResult, error) {
@@ -107,31 +112,40 @@ func (s *Service) Match(req MatchRequest) (*MatchResult, error) {
 			continue
 		}
 
-		//trying to aquire intent lock ( cuncurrency real gate)
-		err := s.drivers.TryLockIntent(
-			c.driverID,
-			req.RiderID,
-			5*time.Second,
-		)
-		if err != nil {
-			continue //somene else won in cuncrrent attempt
-		}
+		//redis provides first-accept-wins
+		//below code is no longer needed
+		// err := s.drivers.TryLockIntent(
+		// 	c.driverID,
+		// 	req.RiderID,
+		// 	5*time.Second,
+		// )
+		// if err != nil {
+		// 	continue //somene else won in cuncrrent attempt
+		// }
 
 		// reserve driver (exclusive lock via FSM)
+		// Move driver into matching state
 		err = s.drivers.TransitionStatus(
 			c.driverID,
 			domain.DriverMatching,
 		)
 		if err != nil {
-			s.drivers.ClearIntent(c.driverID) //rollback intent in FSM fails
-			continue                          //race lost
+			continue
 		}
 
-		//emmiting Offer (async boundary)
-		// err = s.drivers.TransitionStatus( //bussy statu clear the intent in transition
-		// 	c.driverID,
-		// 	domain.DriverBusy,
-		// )
+		// Attach intent (THIS WAS MISSING)
+		err = s.drivers.SetIntent(
+			c.driverID,
+			req.RiderID,
+		)
+		if err != nil {
+			_ = s.drivers.TransitionStatus(
+				c.driverID,
+				domain.DriverIdle,
+			)
+			continue
+		}
+
 		lockedDrivers = append(lockedDrivers, c.driverID)
 
 		slog.Info(fmt.Sprintf("[MATCH] rider=%s trying driver=%s dist=%.2fm\n", req.RiderID, c.driverID, c.distance))
@@ -152,11 +166,23 @@ func (s *Service) Match(req MatchRequest) (*MatchResult, error) {
 	}
 
 	//creating offer group (first-accept-wins)
-	s.offerGroups.Create(
+	//redis already hold the intent locks so no need of them after switching from the inmenmory
+	err = s.offerGroups.Create(
+		context.Background(),
 		req.RiderID,
-		lockedDrivers,
-		5*time.Second,
+		5, //seconds
 	)
+	if err != nil {
+		//You must rollback intent if OfferGroup creation fails.
+		for _, d := range lockedDrivers {
+			s.drivers.ClearIntent(d)
+			_ = s.drivers.TransitionStatus(
+				d,
+				domain.DriverIdle,
+			)
+		}
+		return nil, err
+	}
 
 	//Emiting offers asynchronously, but maintaining control over the GO routine
 	//but need to control the Go routine count
@@ -218,47 +244,74 @@ func (s *Service) HandleDriverResponse(
 	response domain.DriverResponse,
 ) error {
 
-	var resultErr error
-	s.offerGroups.WithLock(riderID, func() {
-		//critical section starts , HERE we go ..
+	ctx := context.Background()
 
-		//offer already revolved ?
-		if !s.offerGroups.Exists(riderID) {
-			resultErr = domain.ErrRideAlreadyAssigned
-			return
+	// --- Reject path ---
+	if response == domain.Reject {
+		slog.Info("[REJECT]", "driver", driverID, "rider", riderID)
+
+		s.drivers.ClearIntent(driverID)
+		_ = s.drivers.TransitionStatus(driverID, domain.DriverIdle)
+
+		return nil
+	}
+
+	// --- ACCEPT path (atomic in Redis) ---
+	won, err := s.offerGroups.Accept(ctx, riderID, driverID)
+	if err != nil {
+		// Check if error is because offer group doesn't exist
+		// This is actually OK - it means someone already won and removed it
+		if err.Error() == "offer expired" {
+			slog.Info("[ACCEPT_AFTER_WINNER]",
+				"driver", driverID,
+				"rider", riderID,
+			)
+
+			// Just clean up this driver silently
+			s.drivers.ClearIntent(driverID)
+			_ = s.drivers.TransitionStatus(driverID, domain.DriverIdle)
+
+			return nil // Not an error - race condition is expected
 		}
 
-		if response == domain.Accept {
-			//winner
-			err := s.drivers.RespondToIntent(driverID, riderID, domain.Accept)
-			if err != nil {
-				resultErr = err
-				return
-			}
+		// Real error - revert driver
+		slog.Warn("[ACCEPT_ERROR]",
+			"driver", driverID,
+			"error", err,
+		)
 
-			//cancel others
-			others := s.offerGroups.OtherDrivers(riderID, driverID)
-			for _, otherID := range others {
-				_ = s.drivers.RespondToIntent(otherID, riderID, domain.Reject)
-			}
-			//remove Rider Request
-			s.offerGroups.Remove(riderID)
+		s.drivers.ClearIntent(driverID)
+		_ = s.drivers.TransitionStatus(driverID, domain.DriverIdle)
 
-			//******TODO*******
-			//- Persist assignment
-			//-Notify Rider
+		return err
+	}
 
-			resultErr = nil
-			return
-		} else {
-			//in case of reject
-			resultErr = s.drivers.RespondToIntent(driverID, riderID, domain.Reject)
-			return
-		}
+	if !won {
+		// Lost the race → revert driver to idle
+		slog.Info("[ACCEPT_LOST]", "driver", driverID, "rider", riderID)
 
-	})
+		s.drivers.ClearIntent(driverID)
+		_ = s.drivers.TransitionStatus(driverID, domain.DriverIdle)
 
-	return resultErr
+		return nil
+	}
+
+	// --- WINNER path ---
+	err = s.drivers.TransitionStatus(driverID, domain.DriverBusy)
+	if err != nil {
+		slog.Error("[ACCEPT_WINNER] transition failed",
+			"driver", driverID,
+			"error", err,
+		)
+		return err
+	}
+
+	slog.Info("[ACCEPT_WINNER]", "driver", driverID, "rider", riderID)
+
+	// DON'T remove offer group here - let it expire naturally
+	// This allows late acceptors to see the group still exists
+	// Redis TTL will clean it up after 5 seconds
+	// _ = s.offerGroups.Remove(ctx, riderID)  // REMOVED THIS LINE
+
+	return nil
 }
-
-//Note : Closure Power: In Go, anonymous functions can "see" and modify variables in their parent scope (like resultErr).

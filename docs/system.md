@@ -105,3 +105,62 @@ Failure isolation	matching must not crash
 
 ## notes
 Only the sender OR the owner closes a channel — never both
+
+
+Redis solves “WHO wins the rider”
+Intent locks solve “WHO owns the driver”
+
+
+##
+┌────────────────────────┐
+│ Match()                │
+│                        │
+│ 1. Find candidates     │
+│ 2. TryLockIntent (DRV) │ ◀─ driver-side gate
+│ 3. Create OfferGroup   │ ◀─ rider-side gate
+│ 4. Emit offers         │
+└────────────────────────┘
+
+
+##
+┌────────────────────────┐
+│ Driver Accept          │
+│                        │
+│ 1. Redis.Accept()     │ ◀─ rider arbitration
+│ 2. FSM transition     │ ◀─ driver commit
+└────────────────────────┘
+
+##
+┌──────────┐
+│  main.go │  ← composition root
+└────┬─────┘
+     │
+     ▼
+┌────────────┐     enqueue      ┌──────────────┐
+│  Service   │ ───────────────▶ │  Dispatcher  │
+│ (business) │                  │  (infra)     │
+└────┬───────┘                  └─────┬────────┘
+     ▲                                │
+     │        callback                ▼
+┌──────────────┐ ◀───────────── ┌──────────────┐
+│ OfferSender  │                │ Worker Queue │
+│ (transport)  │                └──────────────┘
+└──────────────┘
+
+
+
+##
+Test creates Service
+    ↓
+Test creates InMemoryOfferSender(service) ← passes Service as ResponseHandler
+    ↓
+Match() → locks 3 drivers → creates offer_group → enqueues offers
+    ↓
+Dispatcher → calls SendDriverOffer()
+    ↓
+SendDriverOffer() → calls service.HandleDriverResponse() ✅ (was broken before)
+    ↓
+HandleDriverResponse() → calls Redis Accept() → first one wins
+    ↓
+Winner: TransitionStatus(BUSY)
+Losers: TransitionStatus(IDLE)

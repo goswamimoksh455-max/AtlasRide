@@ -15,3 +15,6 @@ We rely on:
 
 Redis single-threaded execution
 TTL guarantees auto-unlock
+
+
+building central main memory store (in-memory store) so that in future multiple node can interact with it
