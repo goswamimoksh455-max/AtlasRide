@@ -10,6 +10,7 @@ import (
 	"github.com/goswamimoksh455-max/projects/AtlasRide/internal/matching"
 	"github.com/goswamimoksh455-max/projects/AtlasRide/internal/offer"
 	"github.com/goswamimoksh455-max/projects/AtlasRide/internal/repository"
+	"github.com/goswamimoksh455-max/projects/AtlasRide/internal/ride"
 	"github.com/goswamimoksh455-max/projects/AtlasRide/internal/spatial"
 	"github.com/redis/go-redis/v9"
 )
@@ -34,7 +35,9 @@ func Benchmark_MatchThroughput(b *testing.B) {
 	}
 
 	spatialIndex := spatial.NewH3Index(9)
-	service := matching.NewService(driverRepo, spatialIndex, *offerGroups)
+	memoryRepo := ride.NewMemoryRepo()
+	RideService := ride.NewRideService(memoryRepo)
+	service := matching.NewService(driverRepo, spatialIndex, *offerGroups, RideService)
 
 	sender := events.NewInMemoryOfferSender(service)
 	dispatcher := events.NewAsyncDispatcher(8, 1000, sender)

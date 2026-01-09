@@ -1,4 +1,3 @@
--- Improved version that doesn't error on "already accepted"
 -- KEYS[1] = offer_group:{riderID}
 -- ARGV[1] = driverID
 

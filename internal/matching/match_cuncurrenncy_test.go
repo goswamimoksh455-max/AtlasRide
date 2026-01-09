@@ -13,6 +13,7 @@ import (
 	"github.com/goswamimoksh455-max/projects/AtlasRide/internal/matching"
 	"github.com/goswamimoksh455-max/projects/AtlasRide/internal/offer"
 	"github.com/goswamimoksh455-max/projects/AtlasRide/internal/repository"
+	"github.com/goswamimoksh455-max/projects/AtlasRide/internal/ride"
 	"github.com/goswamimoksh455-max/projects/AtlasRide/internal/spatial"
 )
 
@@ -37,10 +38,12 @@ func Test_FirstAcceptWins(t *testing.T) {
 	offerGroups := offer.NewRedisOfferGroupStore(rdb)
 	spatialIndex := spatial.NewH3Index(9)
 
+	RideService := ride.NewRideService(ride.NewMemoryRepo())
 	service := matching.NewService(
 		driverRepo,
 		spatialIndex,
 		*offerGroups,
+		RideService,
 	)
 
 	// ---------- Seed drivers ----------
@@ -163,11 +166,13 @@ func Test_MultipleConcurrentRiders(t *testing.T) {
 	driverRepo := repository.NewInMemoryDriverRepository()
 	offerGroups := offer.NewRedisOfferGroupStore(rdb)
 	spatialIndex := spatial.NewH3Index(9)
+	RideService := ride.NewRideService(ride.NewMemoryRepo())
 
 	service := matching.NewService(
 		driverRepo,
 		spatialIndex,
 		*offerGroups,
+		RideService,
 	)
 
 	// Seed 20 drivers

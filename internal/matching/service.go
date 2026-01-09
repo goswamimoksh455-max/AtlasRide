@@ -32,6 +32,10 @@ type SpatialIndex interface {
 	CellIDForLocation(loc domain.Location) (h3.Cell, error)
 }
 
+type RideFinalizer interface {
+	FinalizeAssignment(riderID, driverID string) (domain.Ride, bool, error)
+}
+
 // added for Recovery from Too long Matching stuck
 type RecoveryService struct {
 	drivers DriverStore
@@ -42,13 +46,15 @@ type Service struct {
 	spatial     SpatialIndex
 	events      events.Dispatcher
 	offerGroups offer.RedisOfferGroupStore
+	rides       RideFinalizer
 }
 
-func NewService(drivers DriverStore, spatial SpatialIndex, offerGroups offer.RedisOfferGroupStore) *Service {
+func NewService(drivers DriverStore, spatial SpatialIndex, offerGroups offer.RedisOfferGroupStore, rides RideFinalizer) *Service {
 	return &Service{
 		drivers:     drivers,
 		spatial:     spatial,
 		offerGroups: offerGroups,
+		rides:       rides,
 	}
 }
 
@@ -296,6 +302,40 @@ func (s *Service) HandleDriverResponse(
 		return nil
 	}
 
+	//Persist Outcome (durable)
+	// 	Becomes:
+	// HTTP call or
+	// gRPC call or
+	// Kafka command
+	ride, created, err := s.rides.FinalizeAssignment(riderID, driverID)
+	if err != nil {
+		slog.Error("RIDE_FINALIZE_ERROR",
+			"driver", driverID,
+			"rider", riderID,
+			"error", err,
+		)
+
+		//revert driver intent
+		s.drivers.ClearIntent(driverID)
+		_ = s.drivers.TransitionStatus(driverID, domain.DriverIdle)
+
+		return err
+	}
+
+	if !created {
+		//Someone else already finalized
+		slog.Info("RIDE_ALREADY_EXISTS",
+			"driver", driverID,
+			"rider", riderID,
+			"ride", ride.ID,
+		)
+
+		s.drivers.ClearIntent(driverID)
+		_ = s.drivers.TransitionStatus(driverID, domain.DriverIdle)
+
+		return nil
+	}
+
 	// --- WINNER path ---
 	err = s.drivers.TransitionStatus(driverID, domain.DriverBusy)
 	if err != nil {
@@ -311,7 +351,6 @@ func (s *Service) HandleDriverResponse(
 	// DON'T remove offer group here - let it expire naturally
 	// This allows late acceptors to see the group still exists
 	// Redis TTL will clean it up after 5 seconds
-	// _ = s.offerGroups.Remove(ctx, riderID)  // REMOVED THIS LINE
 
 	return nil
 }
