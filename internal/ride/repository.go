@@ -1,6 +1,10 @@
 package ride
 
-import "github.com/goswamimoksh455-max/projects/AtlasRide/internal/domain"
+import (
+	"context"
+
+	"github.com/goswamimoksh455-max/projects/AtlasRide/internal/domain"
+)
 
 type Repository interface {
 
@@ -13,8 +17,13 @@ type Repository interface {
 
 	) (domain.Ride, bool, error)
 
-	FindByID(
-		riderId string,
+	GetActiveByRider(
+		ctx context.Context,
+		riderID string,
 
+	) (domain.Ride, bool, error)
+
+	FindByID(
+		riderID string,
 	) (domain.Ride, error)
 }

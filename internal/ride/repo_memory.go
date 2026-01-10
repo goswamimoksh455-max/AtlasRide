@@ -1,6 +1,7 @@
 package ride
 
 import (
+	"context"
 	"errors"
 	"sync"
 	"time"
@@ -57,4 +58,24 @@ func (r *MemoryRepo) FindByID(riderID string) (domain.Ride, error) {
 
 	return ride, nil
 
+}
+
+func (r *MemoryRepo) GetActiveByRider(
+	_ context.Context,
+	riderID string,
+) (domain.Ride, bool, error) {
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	ride, ok := r.rides[riderID]
+	if !ok {
+		return domain.Ride{}, false, nil
+	}
+
+	if ride.Status != domain.RideAssigned {
+		return domain.Ride{}, false, nil
+	}
+
+	return ride, true, nil
 }

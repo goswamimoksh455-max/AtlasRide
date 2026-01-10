@@ -12,6 +12,7 @@ import (
 	"github.com/goswamimoksh455-max/projects/AtlasRide/internal/matching"
 	"github.com/goswamimoksh455-max/projects/AtlasRide/internal/offer"
 	"github.com/goswamimoksh455-max/projects/AtlasRide/internal/repository"
+	"github.com/goswamimoksh455-max/projects/AtlasRide/internal/ride"
 	"github.com/goswamimoksh455-max/projects/AtlasRide/internal/spatial"
 	"github.com/redis/go-redis/v9"
 )
@@ -36,12 +37,13 @@ func main() {
 
 	//spatial index
 	spatialIndex := spatial.NewH3Index(9) //resolution 9 ~ 600m
-
+	RideService := ride.NewRideService(ride.NewMemoryRepo())
 	//Matching service
 	serice := matching.NewService(
 		driverRepo,
 		spatialIndex,
 		*offerStore,
+		RideService,
 	)
 
 	//dispatcher
