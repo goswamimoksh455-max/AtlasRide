@@ -11,60 +11,76 @@ import (
 )
 
 type MemoryRepo struct {
-	mu    sync.Mutex
-	rides map[string]domain.Ride //keyed by riderID
-
+	mu            sync.Mutex
+	rides         map[string]domain.Ride // keyed by riderID
+	activeByRider map[string]string      // riderID → rideID
 }
 
 func NewMemoryRepo() *MemoryRepo {
 	return &MemoryRepo{
-		rides: map[string]domain.Ride{},
+		rides: make(map[string]domain.Ride),
 	}
 }
 
 func (r *MemoryRepo) CreateIfAbsent(
+	ctx context.Context,
 	riderID string,
 	driverID string,
-
 ) (domain.Ride, bool, error) {
+	select {
+	case <-ctx.Done():
+		return domain.Ride{}, false, ctx.Err()
+	default:
+	}
+
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	if ride, ok := r.rides[riderID]; ok {
-		return ride, false, nil
+		if ride.Status == domain.RideAssigned || ride.Status == domain.RideOngoing {
+			return ride, false, nil
+		}
 	}
+
+	now := time.Now()
 
 	ride := domain.Ride{
 		ID:        uuid.NewString(),
 		RiderID:   riderID,
 		DriverID:  driverID,
 		Status:    domain.RideAssigned,
-		CreatedAt: time.Now(),
+		CreatedAt: now.UTC(),
+		UpdatedAt: now.UTC(),
 	}
 
 	r.rides[riderID] = ride
-
 	return ride, true, nil
 }
 
-func (r *MemoryRepo) FindByID(riderID string) (domain.Ride, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
+// func (r *MemoryRepo) FindByID(riderID string) (domain.Ride, error) {
+// 	r.mu.Lock()
+// 	defer r.mu.Unlock()
 
-	ride, ok := r.rides[riderID]
-	if !ok {
-		return domain.Ride{}, errors.New("ride not found")
-	}
+// 	ride, ok := r.rides[riderID]
+// 	if !ok {
+// 		return domain.Ride{}, errors.New("ride not found")
+// 	}
 
-	return ride, nil
+// 	return ride, nil
 
-}
+// }
 
 func (r *MemoryRepo) GetActiveByRider(
-	_ context.Context,
+	ctx context.Context,
 	riderID string,
 ) (domain.Ride, bool, error) {
 
+	select {
+	case <-ctx.Done():
+		return domain.Ride{}, false, ctx.Err()
+	default:
+	}
+
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -73,9 +89,36 @@ func (r *MemoryRepo) GetActiveByRider(
 		return domain.Ride{}, false, nil
 	}
 
-	if ride.Status != domain.RideAssigned {
+	if ride.Status != domain.RideAssigned && ride.Status != domain.RideOngoing {
 		return domain.Ride{}, false, nil
 	}
 
 	return ride, true, nil
+}
+
+func (r *MemoryRepo) UpdateStatus(
+	ctx context.Context,
+	rideID string,
+	status domain.RideStatus,
+) error {
+
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	ride, ok := r.rides[rideID]
+	if !ok {
+		return errors.New("ride not found")
+	}
+
+	ride.Status = status
+	ride.UpdatedAt = time.Now().UTC()
+
+	r.rides[rideID] = ride
+	return nil
 }

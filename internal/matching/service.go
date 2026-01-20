@@ -33,7 +33,11 @@ type SpatialIndex interface {
 }
 
 type RideFinalizer interface {
-	FinalizeAssignment(riderID, driverID string) (domain.Ride, bool, error)
+	FinalizeAssignment(
+		ctx context.Context,
+		riderID string,
+		driverID string,
+	) (domain.Ride, bool, error)
 }
 
 // added for Recovery from Too long Matching stuck
@@ -307,7 +311,12 @@ func (s *Service) HandleDriverResponse(
 	// HTTP call or
 	// gRPC call or
 	// Kafka command
-	ride, created, err := s.rides.FinalizeAssignment(riderID, driverID)
+	ride, created, err := s.rides.FinalizeAssignment(
+		ctx,
+		riderID,
+		driverID,
+	)
+
 	if err != nil {
 		slog.Error("RIDE_FINALIZE_ERROR",
 			"driver", driverID,

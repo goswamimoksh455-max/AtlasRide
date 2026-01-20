@@ -12,9 +12,9 @@ type Repository interface {
 	//Enforced via DB uniqueness on rider_id.
 
 	CreateIfAbsent(
+		ctx context.Context,
 		riderID string,
 		driverID string,
-
 	) (domain.Ride, bool, error)
 
 	GetActiveByRider(
@@ -23,7 +23,13 @@ type Repository interface {
 
 	) (domain.Ride, bool, error)
 
-	FindByID(
-		riderID string,
-	) (domain.Ride, error)
+	UpdateStatus(
+		ctx context.Context,
+		rideID string,
+		status domain.RideStatus,
+	) error
+
+	// FindByID(
+	// 	riderID string,
+	// ) (domain.Ride, error)
 }

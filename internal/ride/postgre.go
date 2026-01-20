@@ -3,6 +3,7 @@ package ride
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"time"
 
 	"github.com/google/uuid"
@@ -59,6 +60,7 @@ func (r *PostgresRideRepository) CreateIfAbsent(
 			DriverID:  driverID,
 			Status:    domain.RideAssigned,
 			CreatedAt: now,
+			UpdatedAt: now,
 		}, true, nil
 	}
 
@@ -96,6 +98,7 @@ func (r *PostgresRideRepository) GetActiveByRider(
 		&ride.DriverID,
 		&ride.Status,
 		&ride.CreatedAt,
+		&ride.UpdatedAt,
 	)
 
 	if err == sql.ErrNoRows {
@@ -106,4 +109,32 @@ func (r *PostgresRideRepository) GetActiveByRider(
 	}
 
 	return ride, true, nil
+}
+
+func (r *PostgresRideRepository) UpdateStatus(
+	rideID string,
+	status domain.RideStatus,
+) error {
+
+	res, err := r.db.Exec(`
+		UPDATE rides
+		SET status = $1,
+		    updated_at = now()
+		WHERE id = $2
+	`, status, rideID)
+
+	if err != nil {
+		return err
+	}
+
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+
+	if rows == 0 {
+		return errors.New("ride not found")
+	}
+
+	return nil
 }
